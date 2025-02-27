@@ -1,13 +1,16 @@
-import datetime
-import streamlit as st
 import pandas as pd
-import yfinance as yf
-import capm_functions
+import pandas_datareader.data as web
+from datetime import datetime
+import streamlit as st
+import plotly.express as px
+import capm_functions as capm  # Import CAPM functions
 
-st.set_page_config(page_title="CAPM", page_icon="chart_with_upwards_trend", layout='wide')
-st.title("Capital Asset Pricing Model")
+st.set_page_config(page_title="CAPM Analysis", page_icon="📈", layout='wide')
+st.title("📊 Capital Asset Pricing Model (CAPM)")
 
-# Getting input from the user
+API_KEY = "1IU1JG05HK0NPBP8"  # Replace with your API Key
+
+# UI Components
 col1, col2 = st.columns([1, 1])
 with col1:
     stocks_list = st.multiselect(
@@ -16,97 +19,114 @@ with col1:
         ['TSLA', 'AAPL', 'AMZN', 'GOOGL']
     )
 with col2:
-    year = st.number_input("Number of years", 1, 10)
+    year = st.number_input("Number of years", 1, 10, 5)
 
-# Downloading data for S&P 500 and selected stocks
+# Define date range
+end = datetime.today()
+start = datetime(end.year - year, end.month, end.day)
+
+# Fetch S&P 500 data
 try:
-    end = datetime.date.today()
-    start = datetime.date(end.year - year, end.month, end.day)
-
-    # Downloading S&P 500 data using yfinance
-    sp500 = yf.download('^GSPC', start=start, end=end)['Close'].copy()
-    sp500 = sp500.rename('sp500').reset_index()
-
-    # Downloading stock data
-    stocks_df = pd.DataFrame()
-    for stock in stocks_list:
-        data = yf.download(stock, start=start, end=end)
-        if 'Close' in data:
-            stocks_df[stock] = data['Close'].copy()
-        else:
-            st.warning(f"No data available for {stock} over the selected period.")
-
-    # Checking if data is available before proceeding
-    if not sp500.empty and not stocks_df.empty:
-        stocks_df.reset_index(inplace=True)
-        sp500.columns = ['Date', 'sp500']
-        stocks_df['Date'] = pd.to_datetime(stocks_df['Date'])
-        stocks_df = pd.merge(stocks_df, sp500, on='Date', how='inner')
-
-        # Displaying data head and tail in Streamlit
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.markdown("### Dataframe Head")
-            st.dataframe(stocks_df.head(), use_container_width=True)
-        with col2:
-            st.markdown("### Dataframe Tail")
-            st.dataframe(stocks_df.tail(), use_container_width=True)
-
-        # Price of all stocks plot
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.markdown("### Price of all the stocks")
-            st.plotly_chart(capm_functions.interactive_plot(stocks_df))
-
-        # Normalized price plot
-        with col2:
-            st.markdown("### Price of all the stocks (After Normalization)")
-            normalized_df = capm_functions.normalize(stocks_df)
-            st.plotly_chart(capm_functions.interactive_plot(normalized_df))
-
-        # Calculating daily returns
-        stocks_daily_return = capm_functions.daily_return(stocks_df)
-
-        # Calculating Beta and Alpha for each stock
-        beta = {}
-        alpha = {}
-        for stock in stocks_daily_return.columns:
-            if stock != 'Date' and stock != 'sp500':
-                b, a = capm_functions.calculate_beta(stocks_daily_return, stock)
-                beta[stock] = b
-                alpha[stock] = a
-
-        # Displaying Beta values
-        beta_df = pd.DataFrame({'Stock': list(beta.keys()), 'Beta Value': [round(val, 2) for val in beta.values()]})
-        with col1:
-            st.markdown("### Calculated Beta Value")
-            st.dataframe(beta_df, use_container_width=True)
-
-        # Calculating Expected Returns using CAPM
-        rf = 0  # Risk-free rate
-        rm = stocks_daily_return['sp500'].mean() * 252  # Annualized market return
-        return_value = []
-
-        for stock in stocks_list:
-            if stock in beta:
-                expected_return = rf + (beta[stock] * (rm - rf))
-                return_value.append(str(round(expected_return, 2)))
-            else:
-                return_value.append("N/A")  # Handle stocks with no beta value
-
-        # Create return_df DataFrame
-        return_df = pd.DataFrame({
-            'Stock': stocks_list,
-            'Return Value': return_value
-        })
-
-        # Displaying Expected Returns
-        with col2:
-            st.markdown('### Calculated Return using CAPM')
-            st.dataframe(return_df, use_container_width=True)
-
-    else:
-        st.error("Data could not be retrieved for the selected period. Try a shorter timeframe.")
-
+    sp500 = web.DataReader("SPY", "av-daily", start, end, api_key=API_KEY)[["close"]]
+    sp500 = sp500.rename(columns={"close": "sp500"}).reset_index()
+    sp500.rename(columns={"index": "Date"}, inplace=True)
+    sp500["Date"] = pd.to_datetime(sp500["Date"])
 except Exception as e:
-    st.error(f"An error occurred: {e}")
+    st.error(f"⚠️ Failed to retrieve S&P 500 data: {e}")
+    sp500 = pd.DataFrame()
+
+# Fetch stock data
+stocks_df = pd.DataFrame()
+for stock in stocks_list:
+    try:
+        data = web.DataReader(stock, "av-daily", start, end, api_key=API_KEY)[["close"]]
+        data = data.rename(columns={"close": f"{stock}_close"}).reset_index()
+        data.rename(columns={"index": "Date"}, inplace=True)
+        data["Date"] = pd.to_datetime(data["Date"])
+        stocks_df = pd.concat([stocks_df, data.set_index("Date")], axis=1)
+    except Exception as e:
+        st.warning(f"No data available for {stock}. Skipping...")
+
+if not stocks_df.empty:
+    stocks_df.reset_index(inplace=True)
+    stocks_df["Date"] = pd.to_datetime(stocks_df["Date"])
+
+if not sp500.empty and not stocks_df.empty:
+    stocks_df = pd.merge(stocks_df, sp500, on="Date", how="inner")
+
+    # Display DataFrames
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.markdown("### 📄 Dataframe Head")
+        st.dataframe(stocks_df.head(), use_container_width=True)
+    with col2:
+        st.markdown("### 📄 Dataframe Tail")
+        st.dataframe(stocks_df.tail(), use_container_width=True)
+
+    # Price of stocks over time
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.markdown("### 📈 Stock Prices Over Time")
+        fig = capm.interactive_plot(stocks_df)
+        st.plotly_chart(fig)
+
+    # Normalized Price of Stocks
+    with col2:
+        st.markdown("### 📊 Normalized Stock Prices")
+        normalized_df = capm.normalize(stocks_df)
+        fig = capm.interactive_plot(normalized_df)
+        st.plotly_chart(fig)
+
+    # Calculate Daily Returns
+    daily_returns_df = capm.daily_return(stocks_df)
+
+    # Beta & Alpha Calculation
+    st.subheader("📉 Stock Risk & Performance Metrics")
+
+    results = []
+    for stock in stocks_list:
+        beta, alpha = capm.calculate_beta(daily_returns_df, f"{stock}_close")
+        results.append((stock, beta, alpha))
+
+    # UI for Stock Interpretation
+    st.markdown("### 📊 Stock Performance Summary")
+
+    col1, col2 = st.columns([1, 1])  # Two-column layout
+
+    with col1:
+        st.write("#### 🔍 Risk & Market Volatility")
+        for stock, beta, alpha in results:
+            risk = "⚠️ High Risk" if beta > 1.5 else "📉 Moderate Risk" if beta > 1 else "🟢 Low Risk"
+            st.markdown(f"**{stock}** - **Beta: {beta:.2f}** | {risk}")
+
+    with col2:
+        st.write("#### 📈 Performance Against Market")
+        for stock, beta, alpha in results:
+            performance = "📈 Outperforming" if alpha > 0 else "🔴 Underperforming"
+            st.markdown(f"**{stock}** - **Alpha: {alpha:.2f}** | {performance}")
+
+    # Summary Table
+    st.markdown("### 📊 Summary Table")
+    table_data = pd.DataFrame(results, columns=["Stock", "Beta (β)", "Alpha (α)"])
+    st.dataframe(table_data.style.highlight_max(axis=0, subset=["Beta (β)"], color="yellow"))
+
+    # Overall Insights
+    st.markdown("### 📢 Key Takeaways")
+    for stock, beta, alpha in results:
+        interpretation = ""
+        if beta > 1.5:
+            interpretation = f"🚀 **{stock} is highly volatile**, meaning it reacts strongly to market changes."
+        elif beta > 1:
+            interpretation = f"📊 **{stock} has moderate risk**, moving slightly more than the S&P 500."
+        else:
+            interpretation = f"🛡️ **{stock} is stable**, moving less than the market."
+
+        if alpha > 0:
+            interpretation += f" ✅ **Positive Alpha** suggests that {stock} is **outperforming** market expectations."
+        else:
+            interpretation += f" 🔴 **Negative Alpha** means that {stock} is **underperforming** relative to expectations."
+
+        st.info(interpretation)
+
+else:
+    st.error("⚠️ Data could not be retrieved. Try a different time frame or API.")

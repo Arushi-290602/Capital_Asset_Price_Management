@@ -19,11 +19,10 @@ def normalize(df_2):
 
 def daily_return(df_2):
     df_daily_return = df_2.copy()
-    for i in df_daily_return.columns[1:]:
-        for j in range(1,len(df_daily_return)):
-            df_daily_return[i][j]=((df_daily_return[i][j]-df_daily_return[i][j-1])/df_daily_return[i][j-1])*100
-        df_daily_return[i][0]=0
+    df_daily_return.iloc[:, 1:] = df_daily_return.iloc[:, 1:].pct_change() * 100  # Convert to percentage
+    df_daily_return.iloc[0, 1:] = 0  # Set first row to 0
     return df_daily_return
+
 
 def calculate_beta(stocks_daily_return,stock):
     rm=stocks_daily_return['sp500'].mean()*252
